@@ -412,11 +412,23 @@ func (h *Handler) DeleteFind(c *gin.Context) {
 
 // ---------- Overview ----------
 
+type entityCounts struct {
+	SiteCount int64
+	UnitCount int64
+	FindCount int64
+}
+
+// countEntities 统计各实体总数，概览页与工作台共用同一口径
+func (h *Handler) countEntities() entityCounts {
+	var counts entityCounts
+	h.DB.Model(&models.Site{}).Count(&counts.SiteCount)
+	h.DB.Model(&models.Unit{}).Count(&counts.UnitCount)
+	h.DB.Model(&models.Find{}).Count(&counts.FindCount)
+	return counts
+}
+
 func (h *Handler) Overview(c *gin.Context) {
-	var siteCount, unitCount, findCount int64
-	h.DB.Model(&models.Site{}).Count(&siteCount)
-	h.DB.Model(&models.Unit{}).Count(&unitCount)
-	h.DB.Model(&models.Find{}).Count(&findCount)
+	counts := h.countEntities()
 
 	type typeStat struct {
 		ArtifactType string `json:"artifactType"`
@@ -429,9 +441,51 @@ func (h *Handler) Overview(c *gin.Context) {
 		Scan(&byType)
 
 	c.JSON(http.StatusOK, gin.H{
-		"siteCount": siteCount,
-		"unitCount": unitCount,
-		"findCount": findCount,
+		"siteCount": counts.SiteCount,
+		"unitCount": counts.UnitCount,
+		"findCount": counts.FindCount,
 		"byType":    byType,
+	})
+}
+
+// ---------- Workspace ----------
+
+// chinaLoc 东八区固定时区：不依赖容器 tzdata，且中国已不实行夏令时，与 Asia/Shanghai 等价
+var chinaLoc = time.FixedZone("UTC+8", 8*3600)
+
+// WorkspaceToday 工作台今日数据：
+// 1. 东八区今日新建 Find 数（按 finds.created_at 落在当日 [00:00, 24:00) 统计）
+// 2. 最近 5 条 Find 摘要（按 id 倒序）
+// 3. 各实体总数（与 /api/overview 同一统计口径）
+func (h *Handler) WorkspaceToday(c *gin.Context) {
+	now := time.Now().In(chinaLoc)
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, chinaLoc)
+	dayEnd := dayStart.Add(24 * time.Hour)
+
+	var todayFindCount int64
+	if err := h.DB.Model(&models.Find{}).
+		Where("created_at >= ? AND created_at < ?", dayStart, dayEnd).
+		Count(&todayFindCount).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var recentFinds []models.Find
+	if err := h.DB.Preload("Unit").Preload("Unit.Site").Preload("Material").
+		Order("id desc").Limit(5).Find(&recentFinds).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	counts := h.countEntities()
+
+	c.JSON(http.StatusOK, gin.H{
+		"timezone":       "UTC+8",
+		"today":          dayStart.Format("2006-01-02"),
+		"todayFindCount": todayFindCount,
+		"recentFinds":    recentFinds,
+		"siteCount":      counts.SiteCount,
+		"unitCount":      counts.UnitCount,
+		"findCount":      counts.FindCount,
 	})
 }

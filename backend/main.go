@@ -63,6 +63,7 @@ func main() {
 		{
 			auth.GET("/auth/me", h.Me)
 			auth.GET("/overview", h.Overview)
+			auth.GET("/workspace/today", h.WorkspaceToday)
 
 			auth.GET("/sites", h.ListSites)
 			auth.GET("/sites/:id", h.GetSite)

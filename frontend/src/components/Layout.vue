@@ -32,7 +32,8 @@ const auth = useAuthStore()
 const router = useRouter()
 
 const menus = [
-  { to: '/', label: '概览' },
+  { to: '/', label: '工作台' },
+  { to: '/overview', label: '概览' },
   { to: '/sites', label: '发掘工地' },
   { to: '/units', label: '探方单位' },
   { to: '/finds', label: '出土文物' },
