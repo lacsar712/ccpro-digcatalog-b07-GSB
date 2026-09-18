@@ -38,7 +38,7 @@ async function onSubmit() {
   loading.value = true
   try {
     await auth.login(username.value.trim(), password.value)
-    router.push({ name: 'overview' })
+    router.push({ name: 'workspace' })
   } catch (e) {
     error.value = e.response?.data?.error || '登录失败'
   } finally {

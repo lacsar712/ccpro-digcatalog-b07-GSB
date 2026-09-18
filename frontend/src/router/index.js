@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import Login from '../views/Login.vue'
 import Layout from '../components/Layout.vue'
+import Workspace from '../views/Workspace.vue'
 import Overview from '../views/Overview.vue'
 import Sites from '../views/Sites.vue'
 import Units from '../views/Units.vue'
@@ -14,7 +15,8 @@ const routes = [
     path: '/',
     component: Layout,
     children: [
-      { path: '', name: 'overview', component: Overview },
+      { path: '', name: 'workspace', component: Workspace },
+      { path: 'overview', name: 'overview', component: Overview },
       { path: 'sites', name: 'sites', component: Sites },
       { path: 'units', name: 'units', component: Units },
       { path: 'finds', name: 'finds', component: Finds },
@@ -34,7 +36,7 @@ router.beforeEach((to) => {
     return { name: 'login' }
   }
   if (to.name === 'login' && auth.isLoggedIn) {
-    return { name: 'overview' }
+    return { name: 'workspace' }
   }
 })
 

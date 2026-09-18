@@ -412,11 +412,23 @@ func (h *Handler) DeleteFind(c *gin.Context) {
 
 // ---------- Overview ----------
 
+type entityCounts struct {
+	SiteCount int64 `json:"siteCount"`
+	UnitCount int64 `json:"unitCount"`
+	FindCount int64 `json:"findCount"`
+}
+
+// countEntities 统计各实体总数（自动排除软删除），概览页与工作台共用同一口径。
+func (h *Handler) countEntities() entityCounts {
+	var counts entityCounts
+	h.DB.Model(&models.Site{}).Count(&counts.SiteCount)
+	h.DB.Model(&models.Unit{}).Count(&counts.UnitCount)
+	h.DB.Model(&models.Find{}).Count(&counts.FindCount)
+	return counts
+}
+
 func (h *Handler) Overview(c *gin.Context) {
-	var siteCount, unitCount, findCount int64
-	h.DB.Model(&models.Site{}).Count(&siteCount)
-	h.DB.Model(&models.Unit{}).Count(&unitCount)
-	h.DB.Model(&models.Find{}).Count(&findCount)
+	counts := h.countEntities()
 
 	type typeStat struct {
 		ArtifactType string `json:"artifactType"`
@@ -429,9 +441,78 @@ func (h *Handler) Overview(c *gin.Context) {
 		Scan(&byType)
 
 	c.JSON(http.StatusOK, gin.H{
-		"siteCount": siteCount,
-		"unitCount": unitCount,
-		"findCount": findCount,
+		"siteCount": counts.SiteCount,
+		"unitCount": counts.UnitCount,
+		"findCount": counts.FindCount,
 		"byType":    byType,
+	})
+}
+
+// ---------- Workspace ----------
+
+// cst8 东八区（UTC+8），“今日”口径使用；用 FixedZone 避免依赖容器 tzdata。
+var cst8 = time.FixedZone("CST", 8*60*60)
+
+type findSummary struct {
+	ID           uint       `json:"id"`
+	RegisterNo   string     `json:"registerNo"`
+	ArtifactType string     `json:"artifactType"`
+	MaterialName string     `json:"materialName"`
+	Completeness string     `json:"completeness"`
+	FindDate     *time.Time `json:"findDate"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UnitID       uint       `json:"unitId"`
+	UnitCode     string     `json:"unitCode"`
+	SiteName     string     `json:"siteName"`
+}
+
+// WorkspaceToday 工作台今日摘要：东八区今日新增文物数、最近 5 条登记文物、各实体总数。
+func (h *Handler) WorkspaceToday(c *gin.Context) {
+	now := time.Now().In(cst8)
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, cst8)
+	// created_at 以服务器本地时间写入，查询边界换算到同一本地时间口径
+	start := dayStart.In(time.Local).Format("2006-01-02 15:04:05")
+	end := dayStart.Add(24 * time.Hour).In(time.Local).Format("2006-01-02 15:04:05")
+
+	var todayFindCount int64
+	h.DB.Model(&models.Find{}).
+		Where("created_at >= ? AND created_at < ?", start, end).
+		Count(&todayFindCount)
+
+	var finds []models.Find
+	h.DB.Preload("Unit").Preload("Unit.Site").Preload("Material").
+		Order("id desc").Limit(5).Find(&finds)
+
+	recent := make([]findSummary, 0, len(finds))
+	for _, f := range finds {
+		s := findSummary{
+			ID:           f.ID,
+			RegisterNo:   f.RegisterNo,
+			ArtifactType: f.ArtifactType,
+			MaterialName: f.MaterialName,
+			Completeness: f.Completeness,
+			FindDate:     f.FindDate,
+			CreatedAt:    f.CreatedAt,
+			UnitID:       f.UnitID,
+		}
+		if s.MaterialName == "" && f.Material != nil {
+			s.MaterialName = f.Material.Name
+		}
+		if f.Unit != nil {
+			s.UnitCode = f.Unit.Code
+			if f.Unit.Site != nil {
+				s.SiteName = f.Unit.Site.Name
+			}
+		}
+		recent = append(recent, s)
+	}
+
+	counts := h.countEntities()
+	c.JSON(http.StatusOK, gin.H{
+		"todayFindCount": todayFindCount,
+		"recentFinds":    recent,
+		"siteCount":      counts.SiteCount,
+		"unitCount":      counts.UnitCount,
+		"findCount":      counts.FindCount,
 	})
 }
